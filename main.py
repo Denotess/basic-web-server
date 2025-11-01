@@ -1,4 +1,4 @@
-import http.server, os
+import http.server, os, subprocess
 
 class case_no_file(object):
     def test(self, handler):
@@ -26,7 +26,7 @@ class case_directory_index_file(object):
         return os.path.join(handler.full_path, 'index.html')
 
     def test(self, handler):
-        return  os.path.isdir(handler.full_path, 'index.html') and \
+        return  os.path.isdir(handler.full_path) and \
                 os.path.isfile(self.index_path(handler))
 
     def act(self, handler):
@@ -49,14 +49,6 @@ class case_cgi_file(object):
                 handler.full_path.endswith('.py')
     def act(self, handler):
         handler.run_cgi(handler.full_path)
-
-    def run_cgi(self, full_path):
-        cmd = "python " + full_path
-        child_stdin, child_stdout = os.popen2(cmd)
-        child_stdin.close()
-        data = child_stdout.read()
-        child_stdout.close()
-        self.send_content(data)
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -82,7 +74,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         <tr>  <td>Header</td>         <td>Value</td>          </tr>
         <tr>  <td>Date and time</td>  <td>{date_time}</td>    </tr>
         <tr>  <td>Client host</td>    <td>{client_host}</td>  </tr>
-        <tr>  <td>Client port</td>    <td>{client_port}s</td> </tr>
+        <tr>  <td>Client port</td>    <td>{client_port}</td> </tr>
         <tr>  <td>Command</td>        <td>{command}</td>      </tr>
         <tr>  <td>Path</td>           <td>{path}</td>         </tr>
         </table>
@@ -119,14 +111,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         except IOError as msg:
             msg = "'{0}' cannot be read: {1}".format(self.path, msg)
             self.handle_error(msg)
-    Error_Page = """\
-        <html>
-        <body>
-        <h1>Error accessing {path}</h1>
-        <p>{msg}</p>
-        </body>
-        </html>
-        """
+
     def handle_error(self, msg):
         content = self.Error_Page.format(path=self.path, msg=msg)
         self.send_content(content, 404)
@@ -156,7 +141,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
     def send_page(self, page):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Length", str(len(self.Page)))
+        self.send_header("Content-Length", str(len(page)))
         self.end_headers()
         self.wfile.write(page.encode('utf-8'))
 
@@ -174,12 +159,27 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         try: 
             entries = os.listdir(full_path)
             bullets = ['<li>{0}</li>'.format(e) 
-                       for e in entries if not e.startsiwth('.')]
+                       for e in entries if not e.startswith('.')]
             page = self.Listing_Page.format('\n'.join(bullets))
             self.send_content(page)
         except OSError as msg:
             msg = "'{0}' cannot be listed: {1}".format(self.path, msg)
             self.handle_error(msg)
+    
+    def run_cgi(self, full_path):
+        try:
+            result = subprocess.run(
+                ["python", full_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                raise Exception(f"CGI script failed: {result.stderr}")
+            self.send_content(result.stdout)
+        except Exception as msg:
+            self.handle_error(msg)
+
 
 if __name__ == '__main__':
     serverAddress = ('', 8080)
